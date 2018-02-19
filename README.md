@@ -37,96 +37,96 @@ Turned up these papers (pdf warning and such):
 
 ## Some stats on the data
 Train data:
-   #rows: 159571
-   columns: ['id', 'comment_text', 'toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate']
+   - #rows: 159571
+   - columns: ['id', 'comment_text', 'toxic', 'severe_toxic', 'obscene', 'threat', 'insult', 'identity_hate']
 
 Test data:
-   #rows: 153164
-   columns: ['id', 'comment_text']
+   - #rows: 153164
+   - columns: ['id', 'comment_text']
 
 Can one line have multiple true labels? (train)
-   #rows with more than one true label: 9865
+   - #rows with more than one true label: 9865
 
 How many of each label is there?
-   #toxic:  15294 (=9.58% of train data)
-   #severe_toxic: 1595  (=1.0% of train data)
-   #obscene:   8449  (=5.29% of train data)
-   #threat: 478   (=0.3% of train data)
-   #insult: 7877  (=4.94% of train data)
-   #identity_hate:   1405  (=0.88% of train data)
-   #normal: 143346   (=89.8321% of train data)
+   - #toxic:  15294 (=9.58% of train data)
+   - #severe_toxic: 1595  (=1.0% of train data)
+   - #obscene:   8449  (=5.29% of train data)
+   - #threat: 478   (=0.3% of train data)
+   - #insult: 7877  (=4.94% of train data)
+   - #identity_hate:   1405  (=0.88% of train data)
+   - #normal: 143346   (=89.8321% of train data)
 
 Train:
-   min:  6
-   max:  5000
-   median:  205.0
-   mean: 394.07
-   stddev:  590.72
-   10th perc:  47.0
-   90th perc:  889.0
+   - min:  6
+   - max:  5000
+   - median:  205.0
+   - mean: 394.07
+   - stddev:  590.72
+   - 10th perc:  47.0
+   - 90th perc:  889.0
 
 Test:
-   min:  1
-   max:  5000
-   median:  180.0
-   mean: 364.88
-   stddev:  592.49
-   10th perc:  38.0
-   90th perc:  804.0
+   - min:  1
+   - max:  5000
+   - median:  180.0
+   - mean: 364.88
+   - stddev:  592.49
+   - 10th perc:  38.0
+   - 90th perc:  804.0
 
 Train toxic == 1:
-   min:  8
-   max:  5000
-   median:  123.0
-   mean: 295.25
-   stddev:  617.36
-   10th perc:  34.0
-   90th perc:  582.0
+   - min:  8
+   - max:  5000
+   - median:  123.0
+   - mean: 295.25
+   - stddev:  617.36
+   - 10th perc:  34.0
+   - 90th perc:  582.0
 
 Train severe_toxic == 1:
-   min:  8
-   max:  5000
-   median:  94.0
-   mean: 453.64
-   stddev:  1090.65
-   10th perc:  31.0
-   90th perc:  891.0
+   - min:  8
+   - max:  5000
+   - median:  94.0
+   - mean: 453.64
+   - stddev:  1090.65
+   - 10th perc:  31.0
+   - 90th perc:  891.0
 
 Train obscene == 1:
-   min:  8
-   max:  5000
-   median:  110.0
-   mean: 286.78
-   stddev:  641.05
-   10th perc:  32.0
-   90th perc:  544.0
+   - min:  8
+   - max:  5000
+   - median:  110.0
+   - mean: 286.78
+   - stddev:  641.05
+   - 10th perc:  32.0
+   - 90th perc:  544.0
 
 Train threat == 1:
-   min:  19
-   max:  5000
-   median:  121.0
-   mean: 307.74
-   stddev:  729.44
-   10th perc:  42.0
-   90th perc:  499.6
+   - min:  19
+   - max:  5000
+   - median:  121.0
+   - mean: 307.74
+   - stddev:  729.44
+   - 10th perc:  42.0
+   - 90th perc:  499.6
 
 Train insult == 1:
-   min:  8
-   max:  5000
-   median:  112.0
-   mean: 277.28
-   stddev:  622.51
-   10th perc:  33.0
-   90th perc:  520.4
+   - min:  8
+   - max:  5000
+   - median:  112.0
+   - mean: 277.28
+   - stddev:  622.51
+   - 10th perc:  33.0
+   - 90th perc:  520.4
 
 Train identity_hate == 1:
-   min:  18
-   max:  5000
-   median:  114.0
-   mean: 308.54
-   stddev:  691.38
-   10th perc:  32.0
-   90th perc:  616.6
+   - min:  18
+   - max:  5000
+   - median:  114.0
+   - mean: 308.54
+   - stddev:  691.38
+   - 10th perc:  32.0
+   - 90th perc:  616.6
 
 ### Interpretation
 - Multilabel classification problem. One row can have more than one label
