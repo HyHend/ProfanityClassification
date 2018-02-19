@@ -1,3 +1,5 @@
+_Note: This is a copy paste from the explanation within the ipynb file_
+
 # Profanity Classification
 Based on [this kaggle challenge](https://www.kaggle.com/c/jigsaw-toxic-comment-classification-challenge/data) called "Toxic Comment Classification Challenge - Identify and classify toxic online comments"
 
