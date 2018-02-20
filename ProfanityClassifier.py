@@ -1,136 +1,237 @@
+import math
+import pickle
+import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-import math
-import time
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.decomposition import LatentDirichletAllocation
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import GridSearchCV
 from sklearn.metrics import roc_auc_score
 
+
 class ProfanityClassifier:
     """ Example usage:
-    
-    # Use classifier
+
+    from ProfanityClassifier import ProfanityClassifier
+    import pandas as pd
+
     pcf = ProfanityClassifier(verbose=True)
 
-    # Load data
-    trainPd = pd.read_csv("train.csv")
-    testPd = pd.read_csv("test.csv")
+    # Train model on train data
+    # Optional: numTrainSamplesPerClass (default: 1000), maxFeatures (default: 250)
+    trainedModel = pcf.train("train.csv")
 
-    # Show data stats
-    # pcf.show_data_stats(trainPd, testPd)
+    # OR optionally load existing model
+    #trainedModel = pcf.load_model("model.pickle")
 
-    # Create binary training data
-    binaryTrainingData = pcf.create_binary_training_data(trainPd)
+    # Look into model metrics
+    pcf.get_model_metrics(trainedModel)
 
-    # Train models
-    startTime = time.time()
-    gscvScores, featuresPds, vectorizers = pcf.train_on_binary_training_data(binaryTrainingData)
-    elapsedTime = time.time() - startTime
-    print("Training finished in {0}s".format(elapsedTime))
+    # Predict samples on model.
+    # Possibilities:
+    # - Samples are given in a csv (with rows of format: id, text\n)
+    #   Returns dictionary or DataFrame depending on "dictOut"
+    predictions = pcf.predict_on_csv(trainedModel, "test.csv", dictOut=True)
 
-    # Show most important feature importances (for each model)
-    # pcf.show_feature_importances(gscvScores)
+    # - Samples are given in a dictionary or list of dictionaries
+    #   Returns dictionary or DataFrame depending on "dictOut"
+    predictions = pcf.predict_on_dictionary(trainedModel, {
+        'id':'1234',
+        'comment_text':'Hi, this is a comment :)'
+    }, dictOut=True)
 
-    # Extra validation on remaining test set
-    startTime = time.time()
-    roc_auc, validatePd, predictedValidation = pcf.validate_on_remaining_train_data(trainPd, 
-                                                                                    binaryTrainingData, 
-                                                                                    vectorizers, 
-                                                                                    gscvScores)
-    elapsedTime = time.time() - startTime
-    print("Avg ROC AUC on our validation data is {0}. Calculated in {1}s".format(roc_auc, elapsedTime))
+    # - Samples are given in a pandas DataFrame:
+    predictions = pcf.predict(trainedModel, pd.DataFrame([{
+        'id':'1234',
+        'comment_text':'Hi, this is a comment :)'
+    }]))
 
-    # Allow for simple visual inspection on extra validation results
-    # pcf.print_random_classifications(validatePd,predictedValidation,n=100)
-
-    # Predict on test set
-    predicted = pcf.predict(testPd, 
-                            vectorizers, 
-                            gscvScores)
-
-    # Save prediction
-    pcf.save_predictions(testPd,predicted,"out.csv")
+    # And optionally save model
+    #pcf.save_model(trainedModel, "model.pickle")
     """
     def __init__(self, verbose=False):
         self.verbose = verbose
-        
-    def show_text_len_values(self, column, label):
-        """ Given column, calculates numbers such as
-        mean, median, std dev, min, max text length 
-        of the character counts of the text
-        and prints these. Also prints a histogram based 
-        on the character counts of the texts
+
+    def train(self,
+              csvFilePath,
+              numTrainSamplesPerClass=500,
+              maxFeatures=250):
+        """ Trains model on csv in filePath
+        Returns trained model
         """
-        textLen = column.apply(len)
-        print("{7}:\n\tmin:\t{0}\n\tmax:\t{1}\n\tmedian:\t{2}\n\tmean:\t{3}\n\tstddev:\t{4}\n\t10th perc:\t{5}\n\t90th perc:\t{6}".format(
-            np.min(textLen),
-            np.max(textLen),
-            np.median(textLen),
-            round(np.mean(textLen),2),
-            round(np.std(textLen),2),
-            round(np.percentile(textLen,10),2),
-            round(np.percentile(textLen,90),2),
-            label
-        ))
+        trainPd = pd.read_csv(csvFilePath)
 
-        # Show hist
-        plt.hist(textLen, bins=50)
-        plt.yscale('log', nonposy='clip')
-        plt.ylabel('#texts (log)');
-        plt.xlabel('text length');
-        plt.show()
+        # Create binary training data
+        binaryTrainingData = self.__create_binary_training_data(trainPd,
+                                                                n=numTrainSamplesPerClass)
 
-    def show_data_stats(self, trainPd, testPd):
-        """ Shows/prints information on the dataset
+        # Train on binary training data
+        maxDtmFeatures = int((maxFeatures-6)/2)
+        gscvScores, vectorizers = self.__train_on_binary_training_data(binaryTrainingData,
+                                                                       max_dtm_features=maxDtmFeatures)
+
+        model_avg_roc_auc = self.__validate_on_remaining_train_data({'gscvScores': gscvScores,
+                                                                     'vectorizers': vectorizers},
+                                                                    trainPd,
+                                                                    binaryTrainingData)
+
+        # Return model
+        # (basically a combination of the vectorizers and for every class one model (gscvScores))
+        return {'gscvScores': gscvScores,
+                'vectorizers': vectorizers,
+                'model_avg_roc_auc': model_avg_roc_auc}
+
+    def predict_on_csv(self,
+                       model,
+                       csvFilePath,
+                       dictOut=True):
+        """ Predict given csv with:
+        id, comment_text, class1..,classn
+
+
+        Returns dataframe (or dict when dictOut=True) with rows made up of:
+           id, predictions (continuous, 0-1) for each of the classes
         """
-        # Amount of rows?
-        print("Train data:\n\t#rows: {0}\n\tcolumns: {1}\n".format(trainPd.shape[0], list(trainPd.columns)))
-        print("Test data:\n\t#rows: {0}\n\tcolumns: {1}\n".format(testPd.shape[0], list(testPd.columns)))
+        testPd = pd.read_csv(csvFilePath)
+        predictions = self.predict(model, testPd)
 
-        # Can one line have multiple true labels?
-        multipleLables = trainPd[np.sum(trainPd[['toxic','severe_toxic','obscene','threat','insult','identity_hate']], axis=1) > 1]
-        print("Can one line have multiple true labels? (train)")
-        print("\t#rows with more than one true label: {0}\n".format(multipleLables.shape[0]))
+        # Depending on required output, return DF or dict
+        if dictOut:
+            return predictions.T.to_dict()
+        return predictions
 
-        # How many of each label is there?
-        print("How many of each label is there?")
-        for label in ['toxic','severe_toxic','obscene','threat','insult','identity_hate']:
-            sumL = np.sum(trainPd[label], axis=0)
-            print("\t#{0}:\t{1}\t(={2}% of train data)".format(label, sumL, round((sumL/trainPd.shape[0])*100,2)))
+    def predict_on_dictionary(self,
+                              model,
+                              testDict,
+                              dictOut=True):
+        """ Predict given dictionary with:
+        id, comment_text, class1..,classn
 
-        # Also print amount of normal samples
-        sumL = trainPd[np.sum(trainPd[['toxic','severe_toxic','obscene','threat','insult','identity_hate']], axis=1) < 1].shape[0]
-        print("\t#normal:\t{0}\t(={1}% of train data)\n".format(sumL, round((sumL/trainPd.shape[0])*100,4)))
+        Returns dataframe (or dict when dictOut=True) with rows made up of:
+           id, predictions (continuous, 0-1) for each of the classes
+        """
+        if type(testDict) is not list:
+            testDict = [testDict]
+        testPd = pd.DataFrame(testDict)
+        predictions = self.predict(model, testPd)
 
-        # What is the mean, median, std dev, min, max text length? (train and test)
-        self.show_text_len_values(trainPd['comment_text'],"Train")
-        self.show_text_len_values(testPd['comment_text'],"Test")
+        # Depending on required output, return DF or dict
+        if dictOut:
+            return predictions.T.to_dict()
+        return predictions
 
-        # What is the mean, median, std dev, min, max message length per class? 
-        #  (ignoring the fact that a message can have multiple classes)
-        for label in ['toxic','severe_toxic','obscene','threat','insult','identity_hate']:
-            column = trainPd[trainPd[label] == 1]['comment_text']
-            self.show_text_len_values(column,"Train {0} == 1".format(label))
+    def predict(self, model, testPd):
+        """ Classify on given dataframe using
+        the "best estimators" for each class in the model
+        and the precalculated vectorizers in the model
 
-    def create_binary_training_data(self, 
-                                    trainPd, 
-                                    classes=['toxic','severe_toxic','obscene','threat','insult','identity_hate'], 
-                                    n=1000):
+        DF should contain column 'comment_text'
+
+        Returns dataframe with rows made up of:
+           id, predictions (continuous, 0-1) for each of the classes
+        """
+        # Retrieve classes from model
+        classes = list(model['gscvScores'].keys())
+
+        # Predict rows in testPd on given model
+        predicted = {}
+        for cls in classes:
+            if self.verbose:
+                print("\n--- Predicting class {0} ---".format(cls))
+
+            # Calculate features on data
+            # There is double work being done here
+            #   (for example for each label the simple features are extracted)
+            #   This should be moved to a different location (or memoized)
+            if self.verbose:
+                print("Calculating features..")
+
+            features, vectorizer = self.__calculate_features(testPd,
+                                                             vectorizers=model['vectorizers'][cls])
+
+            # Predict on previously trained models
+            if self.verbose:
+                print("Predicting..")
+
+            estimator = model['gscvScores'][cls]['best_estimator']
+            predicted[cls] = estimator.predict_proba(features)
+
+            if self.verbose:
+                print("-------------------------\n")
+        if self.verbose:
+            print("Done")
+
+        # Process result to format: 'id', 'class1', 'class2', 'classn' etc..
+        resultPd = testPd['id']
+        resultPd = resultPd.reset_index()
+        resultPd.drop(0)
+        for cls in classes:
+            labelResult = pd.DataFrame(predicted[cls], columns=['not_{0}'.format(cls), cls])
+            resultPd = pd.concat([resultPd, labelResult[cls]], axis=1)
+
+        return resultPd
+
+    def save_model(self, model, destinationPath):
+        """ Saves given model as a pickle to destinationPath
+        Does a simple verification given model actually is
+        from our classifier
+        """
+        # Check if model contains vectorizers, gscvScores
+        if 'vectorizers' not in model or 'gscvScores' not in model:
+                raise ValueError("""
+                    Invalid model given.
+                    Model should result from ProfanityClassifier().train(..)
+                    """)
+        else:
+            # Model is ok. Pickle and write to file
+            pickle.dump(model, open(destinationPath, 'wb'))
+
+    def load_model(self, modelPath):
+        """ Loads model from pickle at modelPath
+        Does a simple verification to test it actually
+        is a model resulting from our classifier
+        """
+        model = pickle.load(open(modelPath, 'rb'))
+
+        # Check if model contains vectorizers, gscvScores
+        if 'vectorizers' not in model or 'gscvScores' not in model:
+                raise ValueError("""
+                    Attempted import of invalid model.
+                    Model should result from ProfanityClassifier().train(..)
+                    """)
+        return model
+
+    def get_model_metrics(self, model):
+        """ Extracts and returns model metrics
+        """
+        metrics = {}
+        classes = list(model['gscvScores'].keys())
+        metrics['avg_roc_auc'] = model['model_avg_roc_auc']
+        for cls in classes:
+            metrics['{0}_binary_cv_accuracy'.format(cls)] = model['gscvScores'][cls]['score']
+        return metrics
+
+    def __create_binary_training_data(self,
+                                      trainPd,
+                                      n=1000):
         """ Creates binary training data
         Returns dictionary with, for each class in classes an dataframe df
         where df has two classes of n values. Given class and "other" (True = given, False = other)
         """
         trainPds = {}
 
+        # Retrieve classes from train data
+        classes = list(trainPd.keys())
+        classes.remove('id')
+        classes.remove('comment_text')
+
         # Create train datasets for each class. Resulting in two types of rows *class and *other
-        # Bytheway we're not going to classify anything as "normal". It results from "other" in all binary classifications
-        for label in classes:
-            # Sample "label"(if len(label) < n, sample w/o replacement. Otherwise with replacement)
-            ofLabel = (trainPd[label] == 1)
+        # Bytheway we're not going to classify anything as "normal".
+        #      It results from "other" in all binary classifications
+        for cls in classes:
+            # Sample "label"(if len(trainPd[cls]) < n, sample w/o replacement. Otherwise with replacement)
+            ofLabel = (trainPd[cls] == 1)
             replace = True
             if sum(ofLabel) > n:
                 replace = False
@@ -139,19 +240,78 @@ class ProfanityClassifier:
 
             # Sample not "label" #TODO: Stratified sampling? Or an even amount per class?
             # This class will contain LOTS (90%) of "normal" values if we don't do anything about it
-            nonClassPd = trainPd[trainPd[label] != 1].sample(n, replace=False)
+            nonClassPd = trainPd[trainPd[cls] != 1].sample(n, replace=False)
             nonClassPd['label'] = False
 
             # Add as one (vertically joined) dataframe to trainPds
-            trainPds[label] = pd.concat([classPd, nonClassPd], axis=0)
+            trainPds[cls] = pd.concat([classPd, nonClassPd], axis=0)
 
-            # We now have, per label, one trainPd with samples of given label and samples of all other labels
+            # We now have, per label, one trainPd with samples of given label and samples of all other classes
             # Note, the True values belong to the label class. But can ALSO belong to other classes.
-            #       the False values DON'T belong to the label class. But to any or no amount of other classes 
+            #       the False values DON'T belong to the label class. But to any or no amount of other classes
             #       (With same distribution as the original dataset)
         return trainPds
 
-    def calculate_simple_features(self, message):
+    def __train_on_binary_training_data(self,
+                                        binaryTrainingData,
+                                        max_dtm_features=100):
+        """ Train a classifier for each of the binary classes in binaryTrainingData
+        """
+        gscvScores = {}       # To hold results
+        featuresPds = {}      # To hold dataframes with features
+        vectorizers = {}      # To hold vectorizers necessary for testing
+
+        # Get classes and train a model on each class
+        classes = list(binaryTrainingData.keys())
+        for cls in classes:
+            if self.verbose:
+                print("Processing class {0}:\n------------------".format(cls))
+            currentPd = binaryTrainingData[cls]
+            textPd = currentPd[['id', 'comment_text']]
+            originalLabelsPd = currentPd[classes]
+            classesPd = currentPd['label']
+
+            # Calculate features
+            featureDf, vectorizers[cls] = self.__calculate_features(textPd, max_dtm_features)
+            featuresPds[cls] = featureDf
+            if self.verbose:
+                print("\n#Features: {0}".format(featureDf.shape[1]))
+
+            # Parameter optimization
+            parameters = {
+                'n_estimators': [8, 10, 12],
+                'max_depth': [None, 5, 10],
+                'max_features': ['auto', 'log2', 0.25, 50]
+            }
+
+            # Use random forest
+            # grid search on given parameters
+            # 10 fold cross validation
+            if self.verbose:
+                print("Grid search, cross validation..")
+            rf = RandomForestClassifier()
+            gridSearchCV = GridSearchCV(rf, parameters, cv=10)
+            cvs = gridSearchCV.fit(featureDf, classesPd)
+
+            # Best parameters and corresponding CV score
+            # When necessary, more results in: cvs.cv_results_
+            if self.verbose:
+                print("\n--- Results for {0} ---".format(cls))
+                print("Best parameters: {0}".format(cvs.best_params_))
+                print("With best score: {0}".format(cvs.best_score_))
+                print("-------------------------\n")
+
+            # Append scores to history
+            gscvScores[cls] = {
+                'score': cvs.best_score_,
+                'params': cvs.best_params_,
+                'max_features': max_dtm_features,
+                'best_estimator': cvs.best_estimator_
+            }
+
+        return gscvScores, vectorizers
+
+    def __calculate_simple_features(self, message):
         """Cleans message, calculates values on message such as:
         - % of capitals
         - #characters
@@ -159,51 +319,59 @@ class ProfanityClassifier:
         - #punctuation
         - #!
         - #?
-        etc...
 
         Returns pandas series of dictionary with features
         """
         return pd.Series({
-            'numCapitals':sum(message.count(x) for x in ('Q','W','E','R','T','Y','U','I','O','P','A','S','D','F','G','H','J','K','L','Z','X','C','V','B','N','M')),   # RF model will scale/normalize in respect to num characters
-            'numCharacters':len(message),
-            'numWords':len(message.replace('\n', ' ').replace('  ', ' ').split(' ')),  # Not entirely correct, close enough
-            'numPunctuation':sum(message.count(x) for x in ('!','@','#','$','%','^','&','*','(',')','.',',','/','\\',']','[','{','}','"',':',';',"'",']','`','~','|')),
-            'numExclamation':message.count('!'),
-            'numQuestion':message.count('?'),
+            'numCapitals': sum(message.count(x) for x in ('Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O',
+                                                          'P', 'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K',
+                                                          'L', 'Z', 'X', 'C', 'V', 'B', 'N', 'M')),
+            'numCharacters': len(message),
+            'numWords': len(message.replace('\n', ' ').replace('  ', ' ').split(' ')),
+            'numPunctuation': sum(message.count(x) for x in ('!', '@', '#', '$', '%', '^', '&', '*', '(',
+                                                             ')', '.', ',', '/', '\\', ']', '[', '{',
+                                                             '}', '"', ':', ';', "'", ']', '`', '~', '|')),
+            'numExclamation': message.count('!'),
+            'numQuestion': message.count('?'),
         })
 
-    def create_document_term_matrix(self, 
-                                    messages, 
-                                    max_features=1000, 
-                                    strip_accents='unicode',  #None
-                                    analyzer='word',
-                                    ngram_range=(1,5),        #Optimize
-                                    stop_words='english',
-                                    lowercase=True,
-                                    max_df=0.9,               #Optimize
-                                    min_df=1,                 #Optimize
-                                    tfidf=False):
-        """ Create a document term matrix from given list of messages
+    def __create_document_term_matrix(self,
+                                      messages,
+                                      max_features=1000,
+                                      strip_accents='unicode',
+                                      analyzer='word',
+                                      ngram_range=(1, 5),
+                                      stop_words='english',
+                                      lowercase=True,
+                                      max_df=0.9,
+                                      min_df=1,
+                                      tfidf=False):
+        """ Create a TF or TF/IDF matrix
+        from given list of messages
+
+        Returns resulting matrix (vectorizer)
+        And the dataframe corresponding to this matrix
         """
         vectorizer = CountVectorizer(max_features=max_features,
-                                    strip_accents=strip_accents,
-                                    analyzer=analyzer,
-                                    ngram_range=ngram_range,
-                                    stop_words=stop_words,
-                                    lowercase=lowercase,
-                                    max_df=max_df,
-                                    min_df=min_df,
-                                    )
+                                     strip_accents=strip_accents,
+                                     analyzer=analyzer,
+                                     ngram_range=ngram_range,
+                                     stop_words=stop_words,
+                                     lowercase=lowercase,
+                                     max_df=max_df,
+                                     min_df=min_df,
+                                     )
 
         if tfidf:
+            # Override. Use the tfidf vectorizer
             vectorizer = TfidfVectorizer(max_features=max_features,
-                                    strip_accents=strip_accents,
-                                    analyzer=analyzer,
-                                    ngram_range=ngram_range,
-                                    stop_words=stop_words,
-                                    lowercase=lowercase,
-                                    max_df=max_df,
-                                    min_df=min_df)    # Override. Use the tfidf vectorizer
+                                         strip_accents=strip_accents,
+                                         analyzer=analyzer,
+                                         ngram_range=ngram_range,
+                                         stop_words=stop_words,
+                                         lowercase=lowercase,
+                                         max_df=max_df,
+                                         min_df=min_df)
         vectorizer.fit(messages)
 
         dtm = vectorizer.transform(messages)
@@ -211,160 +379,85 @@ class ProfanityClassifier:
 
         return dtmDf, vectorizer
 
-    def calculate_features(self, 
-                           textPd, 
-                           max_dtm_features=1000, 
-                           vectorizers=None):
+    def __calculate_features(self,
+                             textPd,
+                             max_dtm_features=1000,
+                             vectorizers=None):
         """ Calculates features based on text column of dataframe
         Returns features and a dictionary of built vectorizers
         """
         # Simple
-        if self.verbose: print("Creating simple features..")
-        simpleDf = textPd['comment_text'].apply(self.calculate_simple_features)
+        if self.verbose:
+            print("Creating simple features..")
+        simpleDf = textPd['comment_text'].apply(self.__calculate_simple_features)
         simpleDf = simpleDf.reset_index()
         simpleDf = simpleDf.drop(columns=['index'])
 
         # Based on vectorizers given or not given, calculate or use
-        if vectorizers == None:
-            if self.verbose: print("No vectorizers given. Creating new on data.")
+        if vectorizers is None:
+            # Vectorizers have not been given. Meaning this is the train step
+            #   and we will have to calculate them
+            if self.verbose:
+                print("No vectorizers given. Creating new on data.")
 
             # DTM
-            if self.verbose: print("Creating document term matrix..")
-            if self.verbose: print("Count..")
-            dtmCountDf, dtmCountVectorizer = self.create_document_term_matrix(list(textPd['comment_text']), max_features=max_dtm_features)
+            if self.verbose:
+                print("Creating document term matrix..")
+                print("Count..")
+            dtmCountDf, dtmCountVectorizer = self.__create_document_term_matrix(list(textPd['comment_text']),
+                                                                                max_features=max_dtm_features)
 
             # TF/IDF
-            if self.verbose: print("TF/IDF..")
-            dtmTfIdfDf, tfIdfVectorizer = self.create_document_term_matrix(list(textPd['comment_text']), max_features=max_dtm_features, tfidf=True)
+            if self.verbose:
+                print("TF/IDF..")
+            dtmTfIdfDf, tfIdfVectorizer = self.__create_document_term_matrix(list(textPd['comment_text']),
+                                                                             max_features=max_dtm_features,
+                                                                             tfidf=True)
         else:
-            if self.verbose: print("Vectorizers found. Only applying new data on these vectorizers.")
+            # Vectorizers have been given. Meaning this is the test step
+            #   and we can use the previously trained vectorizers
+            if self.verbose:
+                print("Vectorizers found. Only applying new data on these vectorizers.")
 
-            # DTM
-            if self.verbose: print("Count..")
+            # DTM (test)
+            if self.verbose:
+                print("Count..")
             dtmCount = vectorizers['dtmCountVectorizer'].transform(list(textPd['comment_text']))
-            dtmCountDf, dtmCountVectorizer = pd.DataFrame(dtmCount.toarray(), columns=vectorizers['dtmCountVectorizer'].get_feature_names()), vectorizers['dtmCountVectorizer']
+            dtmCountDf = pd.DataFrame(dtmCount.toarray(),
+                                      columns=vectorizers['dtmCountVectorizer'].get_feature_names())
+            dtmCountVectorizer = vectorizers['dtmCountVectorizer']
 
-            # TF/IDF
-            if self.verbose: print("TF/IDF..")
+            # TF/IDF (test)
+            if self.verbose:
+                print("TF/IDF..")
             dtmTfIdf = vectorizers['tfIdfVectorizer'].transform(list(textPd['comment_text']))
-            dtmTfIdfDf, tfIdfVectorizer = pd.DataFrame(dtmCount.toarray(), columns=vectorizers['tfIdfVectorizer'].get_feature_names()), vectorizers['tfIdfVectorizer']
+            dtmTfIdfDf = pd.DataFrame(dtmCount.toarray(),
+                                      columns=vectorizers['tfIdfVectorizer'].get_feature_names())
+            tfIdfVectorizer = vectorizers['tfIdfVectorizer']
 
         # Merge into one feature DF
         featureDf = pd.concat([simpleDf, dtmCountDf, dtmTfIdfDf], axis=1)
-        return featureDf, {'dtmCountVectorizer':dtmCountVectorizer, 'tfIdfVectorizer':tfIdfVectorizer}
+        vectorizers = {'dtmCountVectorizer': dtmCountVectorizer, 'tfIdfVectorizer': tfIdfVectorizer}
+        return featureDf, vectorizers
 
-    def train_on_binary_training_data(self, 
-                                      binaryTrainingData,
-                                      labels=['toxic','severe_toxic','obscene','threat','insult','identity_hate'],
-                                      max_dtm_features=100):
-        """ Train an classifier for each of the binary classes in binaryTrainingData
-        """
-        gscvScores = {}       # To hold results
-        featuresPds = {}      # To hold dataframes with features
-        vectorizers = {}      # To hold vectorizers necessary for testing
-        for label in labels: 
-            if self.verbose: print("Processing label {0}:\n------------------".format(label))
-            currentPd = binaryTrainingData[label]
-            textPd = currentPd[['id','comment_text']]
-            originalLabelsPd = currentPd[labels]
-            labelsPd = currentPd['label']
-
-            # Calculate features
-            featureDf, vectorizers[label] = self.calculate_features(textPd, max_dtm_features)
-            featuresPds[label] = featureDf
-            if self.verbose: print("\n#Features: {0}".format(featureDf.shape[1]))
-
-            # Parameter optimization
-            parameters = {
-                'n_estimators': [8, 10, 12], 
-                'max_depth': [None, 5, 10],
-                'max_features': ['auto','log2',0.25,50] #,25
-            }
-
-            # Use random forest
-            # grid search on given parameters
-            # Use 10 fold cross validation
-            if self.verbose: print("Grid search, cross validation..")
-            rf = RandomForestClassifier()
-            gridSearchCV = GridSearchCV(rf, parameters, cv=10)
-            cvs = gridSearchCV.fit(featureDf, labelsPd)
-
-            # Best parameters and corresponding CV score
-            # When necessary, more results in: cvs.cv_results_
-            if self.verbose: print("\n--- Results for {0} ---".format(label))
-            if self.verbose: print("Best parameters: {0}".format(cvs.best_params_))
-            if self.verbose: print("With best score: {0}".format(cvs.best_score_))
-            if self.verbose: print("-------------------------\n".format(label))
-
-            # Append scores to history
-            gscvScores[label] = {
-                'score':cvs.best_score_,
-                'params':cvs.best_params_,
-                'max_features':max_dtm_features,
-                'best_estimator':cvs.best_estimator_
-            }
-
-        return gscvScores, featuresPds, vectorizers
-
-    def show_feature_importances(self, gscvScores, top_n=30):
-        """ Look into feature importances. Does it make sense?
-        Allows for visual inspection
-        """
-        featureImportances = {}
-        for label in ['toxic','severe_toxic','obscene','threat','insult','identity_hate']: 
-            fi = gscvScores[label]['best_estimator'].feature_importances_
-            featureImportances[label] = pd.DataFrame([fi], columns=featuresPds[label].columns).T.sort_values(by=0, ascending=False)
-            if self.verbose: print("Feature importances for {0}:\n\n{1}\n\n".format(label, featureImportances[label][0:top_n]))
-
-    def predict(self, 
-                inPd, 
-                vectorizers,
-                gscvScores,
-                labels=['toxic','severe_toxic','obscene','threat','insult','identity_hate']):
-        """ Classify on given DF using 
-        the "best estimators" for each class
-        and the precalculated (on train data, without labels) vectorizers
-
-        DF should contain column 'comment_text'
-
-        Returns prediction (continuous, 0-1) for each of the labels to be True
-        """
-        predicted = {}
-        for label in labels: 
-            if self.verbose: print("Predicting on label {0}".format(label))
-
-            # Calculate features on data
-            # There is double work being done here 
-            #   (for example for each label the simple features are extracted)
-            #   This should be moved to a different location (or memoized)
-            if self.verbose: print("Calculating features..")
-            features, vectorizer = self.calculate_features(inPd, max_dtm_features=500, vectorizers=vectorizers[label])
-
-            # Predict on previously trained models
-            if self.verbose: print("Predicting..")
-            estimator = gscvScores[label]['best_estimator']
-            predicted[label] = estimator.predict_proba(features)
-        if self.verbose: print("Done")
-        return predicted
-
-    def validate_on_remaining_train_data(self, 
-                                         trainPd, 
-                                         binaryTrainingData,
-                                         vectorizers,
-                                         gscvScores,
-                                         sample=10000,
-                                         labels=['toxic','severe_toxic','obscene','threat','insult','identity_hate']):
-        """ Uses remaining training data 
+    def __validate_on_remaining_train_data(self,
+                                           model,
+                                           trainPd,
+                                           binaryTrainingData,
+                                           sample=5000):
+        """ Uses remaining training data
         predicts using trained models
         calculates and shows average area under curve roc result
 
         Returns average AUC ROC and for each class the AUC ROC
         """
-        # Create a dataframe from the train dataframe 
+        classes = list(binaryTrainingData.keys())
+
+        # Create a dataframe from the train dataframe
         # without all samples on which the models are trained
         trainedWith = pd.Series()
-        for label in labels:
-            trainedWith = pd.concat([trainedWith, binaryTrainingData[label]['id']], axis=0)    
+        for cls in classes:
+            trainedWith = pd.concat([trainedWith, binaryTrainingData[cls]['id']], axis=0)
         validatePd = trainPd[~trainPd['id'].isin(trainedWith)]
 
         # Validate on all train samples which have not been used in training
@@ -373,53 +466,12 @@ class ProfanityClassifier:
         else:
             # Use the entire validation Pd
             samplePd = validatePd
-        predictedValidation = self.predict(samplePd,vectorizers,gscvScores)
+        predictedValidationPd = self.predict(model, samplePd)
 
         # Calculate average area under roc
-        resultPd = pd.Series()
-        for label in labels:
-            labelResult = pd.DataFrame(predictedValidation[label], columns=['not_{0}'.format(label),label])
-            resultPd = pd.concat([resultPd, labelResult[label]], axis=1)
-        roc_auc = roc_auc_score(samplePd[labels], resultPd[labels])
+        print("=============")
+        roc_auc = roc_auc_score(samplePd[classes], predictedValidationPd[classes])
+        if self.verbose:
+            print("Model average roc auc: {0}".format(roc_auc))
 
-        return roc_auc,samplePd,predictedValidation
-
-    def save_predictions(self, 
-                         inPd, 
-                         predictions,
-                         csvPath,
-                         labels=['toxic','severe_toxic','obscene','threat','insult','identity_hate']):
-        """ Save results to output csv
-        """
-        resultPd = inPd['id']
-        for label in labels:
-            labelResult = pd.DataFrame(predicted[label], columns=['not_{0}'.format(label),label])
-            resultPd = pd.concat([resultPd, labelResult[label]], axis=1)
-        resultPd.to_csv(csvPath, index=False)
-
-    def print_random_classifications(self, 
-                                     actual,
-                                     predicted,
-                                     labels=['toxic','severe_toxic','obscene','threat','insult','identity_hate'],
-                                     n=10):
-        """Shows n messages with their classification
-        """
-        resultPd = actual
-        resultPd = resultPd.reset_index()
-        resultPd.drop(0)
-        for label in labels:
-            labelResult = pd.DataFrame(predicted[label], columns=['predicted_not_{0}'.format(label),'predicted_{0}'.format(label)])
-            resultPd = pd.concat([resultPd, labelResult], axis=1)
-        resultPd = resultPd.sample(n)
-
-        for index, row in resultPd.iterrows():
-            print("===================\n")
-            print("Class:\t\tPredicted\tActual")
-            print("Toxic:\t\t{0}\t\t{1}".format(round(row['predicted_toxic'],2),row['toxic']))
-            print("severe_toxic:\t{0}\t\t{1}".format(round(row['predicted_severe_toxic'],2),row['severe_toxic']))
-            print("obscene:\t{0}\t\t{1}".format(round(row['predicted_obscene'],2),row['obscene']))
-            print("threat:\t\t{0}\t\t{1}".format(round(row['predicted_threat'],2),row['threat']))
-            print("insult:\t\t{0}\t\t{1}".format(round(row['predicted_insult'],2),row['insult']))
-            print("identity_hate:\t{0}\t\t{1}\n".format(round(row['identity_hate'],2),row['identity_hate']))
-            print(row['comment_text'])
-            print("\n===================\n")
+        return roc_auc
