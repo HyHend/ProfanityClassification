@@ -1,7 +1,83 @@
-_Note: This is a copy paste from the explanation within the ipynb file_
+_Note: A lot of the following is a copy paste from the explanation within the ipynb file_
 
 # Profanity Classification
 Based on [this kaggle challenge](https://www.kaggle.com/c/jigsaw-toxic-comment-classification-challenge/data) called "Toxic Comment Classification Challenge - Identify and classify toxic online comments"
+
+### Usage
+#### Install necessary packages
+Make sure you have python3 and pip(3) running:
+- [python3](https://www.digitalocean.com/community/tutorials/how-to-install-python-3-and-set-up-a-local-programming-environment-on-macos)
+- [pip3](http://itsevans.com/install-pip-osx/)
+
+Use pip3 ([on virtualenv when you can](https://docs.python.org/3/library/venv.html)) to install:
+- pandas
+- numpy
+- sklearn 
+- matplotlib
+
+#### Download the datasets
+Download the datasets train.csv and test.csv from [the Kaggle page](https://www.kaggle.com/c/jigsaw-toxic-comment-classification-challenge/data) (after required login, acceptance of agreements)
+- You can also download model.pickle from this git and use `load_model` which is explained later.
+
+#### Python usage
+```
+from ProfanityClassifier import ProfanityClassifier
+import pandas as pd
+```
+
+Initiate the class
+```
+pcf = ProfanityClassifier(verbose=True)
+```
+
+Train model on train data
+Optional: `numTrainSamplesPerClass (default: 1000)`, `maxFeatures (default: 250)`
+```
+trainedModel = pcf.train("train.csv")
+```
+
+OR optionally load existing model:
+```
+#trainedModel = pcf.load_model("model.pickle")
+```
+
+Look into model metrics:
+```
+pcf.get_model_metrics(trainedModel)
+```
+
+Predict samples on model.
+Possibilities:
+
+1. Samples are given in a csv (with rows of format: id, text\n)
+- Returns dictionary or DataFrame depending on "dictOut"
+```
+predictions = pcf.predict_on_csv(trainedModel, "test.csv", dictOut=True)
+```
+
+2. Samples are given in a dictionary or list of dictionaries
+- Returns dictionary or DataFrame depending on "dictOut"
+```
+predictions = pcf.predict_on_dictionary(trainedModel, {
+    'id':'1234',
+    'comment_text':'Hi, this is a comment :)'
+}, dictOut=True)
+```
+
+3. Samples are given in a pandas DataFrame:
+```
+predictions = pcf.predict(trainedModel, pd.DataFrame([{
+    'id':'1234',
+    'comment_text':'Hi, this is a comment :)'
+}]))
+```
+
+And optionally save model:
+```
+pcf.save_model(trainedModel, "model.pickle")
+```
+
+----------------------------------
 
 ### Quick research
 Turned up these papers (pdf warning and such):
