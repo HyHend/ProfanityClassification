@@ -38,10 +38,10 @@ trainedModel = pcf.train("train.csv")
 
 OR optionally load existing model:
 ```
-#trainedModel = pcf.load_model("model.pickle")
+trainedModel = pcf.load_model("model.pickle")
 ```
 
-Look into model metrics:
+Look into model metrics (A great method to compare an old to a new model):
 ```
 pcf.get_model_metrics(trainedModel)
 ```
