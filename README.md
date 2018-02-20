@@ -18,6 +18,7 @@ Use pip3 ([on virtualenv when you can](https://docs.python.org/3/library/venv.ht
 #### Download the datasets
 Download the datasets train.csv and test.csv from [the Kaggle page](https://www.kaggle.com/c/jigsaw-toxic-comment-classification-challenge/data) (after required login, acceptance of agreements)
 - You can also download model.pickle from this git and use `load_model` which is explained later.
+- Note: In the examples, all files are in the same directory as the code
 
 #### Python usage
 ```
@@ -27,7 +28,7 @@ import pandas as pd
 
 Initiate the class
 ```
-pcf = ProfanityClassifier(verbose=True)
+pcf = ProfanityClassifier(verbose=False)
 ```
 
 Train model on train data
@@ -77,7 +78,53 @@ And optionally save model:
 pcf.save_model(trainedModel, "model.pickle")
 ```
 
+### Example usage with existing model
+```
+from ProfanityClassifier import ProfanityClassifier
+import pandas as pd
+
+pcf = ProfanityClassifier(verbose=False)
+
+# Import model
+trainedModel = pcf.load_model("model.pickle")
+
+# Predict on model
+predictions = pcf.predict_on_dictionary(trainedModel, {
+    'id':'1234',
+    'comment_text':'Hi, this is a comment :)'
+}, dictOut=True)
+```
+
+### Example re-training of model
+```
+from ProfanityClassifier import ProfanityClassifier
+import pandas as pd
+
+pcf = ProfanityClassifier(verbose=False)
+
+# Train model
+trainedModel = pcf.train("train.csv")
+
+# Show metrics
+pcf.get_model_metrics(trainedModel)
+
+# Save model
+pcf.save_model(trainedModel, "model.pickle")
+```
+
 ----------------------------------
+
+### Process:
+The process can be found below. 
+1. First some shallow reading of existing research
+2. Analysis of the data. What do we have?
+3. Interpretation of the data
+4. Setting out our options of what to do
+5. Selecting option to build (multiple are possible)
+6. Explanation of what is built
+7. Results
+- _Note: Here we could/should re-evaluate, find out how to improve. Basically starting at 3/4_
+8. Conclusion
 
 ### Quick research
 Turned up these papers (pdf warning and such):
